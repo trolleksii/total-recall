@@ -57,8 +57,8 @@ graph TD
 
     style A fill:#e1f5fe
     style F fill:#c8e6c9
+    style D fill:#fff3e0
     style E fill:#fff3e0
-    style G fill:#f3e5f5
 ```
 
 ### Query & Recall Workflow
