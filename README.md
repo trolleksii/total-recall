@@ -49,17 +49,14 @@ go build -o ./bin/recall ./cmd/main.go
 
 ```mermaid
 graph TD
-    A[.zsh_history file] --> B[Parse Commands & Timestamps]
+    A[.zsh_history file] --> B[Parse Commands]
     B --> C[Process in Batches of 10]
     C --> D[Generate Command Summaries<br/>LLM via Ollama]
     D --> E[Generate Embeddings<br/>Embedding Model via Ollama]
     E --> F[Store Vectors & Metadata<br/>in Qdrant Collection]
 
-    D --> G[Optional: Export to JSON]
-
     style A fill:#e1f5fe
     style F fill:#c8e6c9
-    style D fill:#fff3e0
     style E fill:#fff3e0
     style G fill:#f3e5f5
 ```
