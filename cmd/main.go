@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"total-recall/internal/config"
+	"total-recall/internal/context7"
 	"total-recall/internal/ollama"
 	"total-recall/internal/parser"
 	"total-recall/internal/qdrant"
@@ -82,20 +83,21 @@ const (
 
 // tuiModel represents the TUI application state
 type tuiModel struct {
-	ctx           context.Context
-	originalQuery string
-	commands      []types.EmbeddedCommand
-	state         tuiState
-	textInput     textinput.Model
-	spinner       spinner.Model
-	paginator     paginator.Model
-	viewport      viewport.Model
-	ollamaClient  *ollama.Client
-	qdrantClient  *qdrant.Client
-	cfg           *config.Config
-	error         error
-	width         int
-	height        int
+	ctx              context.Context
+	originalQuery    string
+	commands         []types.EmbeddedCommand
+	state            tuiState
+	textInput        textinput.Model
+	spinner          spinner.Model
+	paginator        paginator.Model
+	viewport         viewport.Model
+	ollamaClient     *ollama.Client
+	qdrantClient     *qdrant.Client
+	context7Client   *context7.Client
+	cfg              *config.Config
+	error            error
+	width            int
+	height           int
 	// Exit handling
 	selectedCommand  string
 	shouldOpenEditor bool
@@ -138,20 +140,24 @@ func runTUI(ctx context.Context, query string, ollamaClient *ollama.Client, qdra
 		BorderForeground(lipgloss.Color("62")).
 		PaddingRight(2)
 
+	// Initialize Context7 client
+	context7Client := context7.NewClient(cfg.Context7.APIKey)
+
 	m := tuiModel{
-		ctx:           ctx,
-		originalQuery: query,
-		commands:      commands,
-		state:         stateNormal,
-		textInput:     ti,
-		spinner:       s,
-		paginator:     p,
-		viewport:      vp,
-		ollamaClient:  ollamaClient,
-		qdrantClient:  qdrantClient,
-		cfg:           cfg,
-		width:         80,
-		height:        24,
+		ctx:            ctx,
+		originalQuery:  query,
+		commands:       commands,
+		state:          stateNormal,
+		textInput:      ti,
+		spinner:        s,
+		paginator:      p,
+		viewport:       vp,
+		ollamaClient:   ollamaClient,
+		qdrantClient:   qdrantClient,
+		context7Client: context7Client,
+		cfg:            cfg,
+		width:          80,
+		height:         24,
 	}
 
 	program := tea.NewProgram(m, tea.WithAltScreen())
@@ -579,8 +585,38 @@ func (m tuiModel) refineCommand(refinementQuery string) tea.Cmd {
 	return func() tea.Msg {
 		selectedCommand := m.commands[m.paginator.Page].Text
 
-		// Use the new refinement prompt template
-		prompt := ollama.ComposeRefinementPrompt(selectedCommand, refinementQuery)
+		// Step 1: Detect the primary tool/technology using LLM
+		toolDetectionPrompt := ollama.ComposeToolDetectionPrompt(selectedCommand)
+		toolName, err := m.ollamaClient.GenerateResponse(m.ctx, toolDetectionPrompt)
+		if err != nil {
+			// Fallback: proceed without documentation
+			return m.refineWithoutDocs(selectedCommand, refinementQuery)
+		}
+
+		toolName = strings.TrimSpace(toolName)
+
+		// Step 2: Fetch documentation from Context7 API
+		documentation := ""
+		if toolName != "" && toolName != "bash" {
+			// Resolve library ID
+			libraryID, err := m.context7Client.ResolveLibraryID(m.ctx, toolName)
+			if err == nil {
+				// Fetch documentation with the refinement query as topic
+				docs, err := m.context7Client.GetLibraryDocs(m.ctx, libraryID, refinementQuery)
+				if err == nil {
+					documentation = docs
+				}
+			}
+			// Silently continue if Context7 fails - we'll use refinement without docs
+		}
+
+		// Step 3: Generate refinement with documentation context
+		var prompt string
+		if documentation != "" {
+			prompt = ollama.ComposeRefinementPromptWithDocs(selectedCommand, refinementQuery, documentation)
+		} else {
+			prompt = ollama.ComposeRefinementPrompt(selectedCommand, refinementQuery)
+		}
 
 		// Get LLM response with new commands
 		response, err := m.ollamaClient.GenerateResponse(m.ctx, prompt)
@@ -610,6 +646,36 @@ func (m tuiModel) refineCommand(refinementQuery string) tea.Cmd {
 		return commandsMsg{embeddedCommands}
 	}
 }
+
+// refineWithoutDocs is a fallback refinement without documentation
+func (m tuiModel) refineWithoutDocs(selectedCommand, refinementQuery string) tea.Msg {
+	prompt := ollama.ComposeRefinementPrompt(selectedCommand, refinementQuery)
+
+	response, err := m.ollamaClient.GenerateResponse(m.ctx, prompt)
+	if err != nil {
+		return errorMsg{err}
+	}
+
+	newCommands := parseRefinementResponse(response)
+	if len(newCommands) == 0 {
+		return errorMsg{fmt.Errorf("no valid commands generated from refinement")}
+	}
+
+	embeddedCommands := make([]types.EmbeddedCommand, len(newCommands))
+	for i, cmd := range newCommands {
+		embeddedCommands[i] = types.EmbeddedCommand{
+			Command: types.Command{
+				Text:      cmd,
+				Timestamp: time.Now(),
+			},
+			Vector: []float32{},
+			ID:     fmt.Sprintf("refined-%d", i),
+		}
+	}
+
+	return commandsMsg{embeddedCommands}
+}
+
 
 // parseRefinementResponse parses the LLM response containing new commands
 func parseRefinementResponse(response string) []string {

@@ -27,10 +27,15 @@ type Config struct {
 		TopK               int    `yaml:"top_k"`
 	} `yaml:"application"`
 
+	Context7 struct {
+		APIKey string `yaml:"apiKey"`
+	} `yaml:"context7"`
+
 	Prompts struct {
-		SummaryTemplate    string `yaml:"summaryTemplate"`
-		RankingTemplate    string `yaml:"rankingTemplate"`
-		RefinementTemplate string `yaml:"refinementTemplate"`
+		SummaryTemplate       string `yaml:"summaryTemplate"`
+		RankingTemplate       string `yaml:"rankingTemplate"`
+		RefinementTemplate    string `yaml:"refinementTemplate"`
+		ToolDetectionTemplate string `yaml:"toolDetectionTemplate"`
 	} `yaml:"prompts"`
 }
 
@@ -56,9 +61,12 @@ func Load() (*Config, error) {
 	cfg.Application.DefaultHistoryFile = "~/.zsh_history"
 	cfg.Application.TopK = 15
 
+	cfg.Context7.APIKey = "" // Optional: Can be set via config file or environment variable
+
 	cfg.Prompts.SummaryTemplate = "~/.config/total-recall/summary_prompt.tmpl"
 	cfg.Prompts.RankingTemplate = "~/.config/total-recall/ranking_prompt.tmpl"
 	cfg.Prompts.RefinementTemplate = "~/.config/total-recall/refinement_prompt.tmpl"
+	cfg.Prompts.ToolDetectionTemplate = "~/.config/total-recall/tool_detection_prompt.tmpl"
 
 	// Try to load from config file
 	configPath := getConfigPath()

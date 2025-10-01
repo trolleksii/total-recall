@@ -135,11 +135,46 @@ Your response must only contain the numbers of the top 3 commands separated by s
 
 Response: `
 
+const toolDetectionPromptTmplDefault string = `
+You are a DevOps expert. Analyze the following shell command and identify the PRIMARY tool or technology being used.
+
+Shell command:
+%s
+
+Your task is to identify the main tool/application (e.g., kubectl, docker, curl, jq, helm, git, terraform, etc.).
+
+Rules:
+- Return ONLY the tool name, nothing else
+- If the command uses multiple tools, return the most significant one
+- If it's a basic shell command (cd, ls, echo, etc.), return "bash"
+- If you cannot identify a specific tool, return "bash"
+- Do not include version numbers or additional text
+
+Examples:
+Command: kubectl get pods -n production
+Response: kubectl
+
+Command: docker run -it ubuntu bash
+Response: docker
+
+Command: curl -X POST https://api.example.com/data | jq '.results[]'
+Response: curl
+
+Command: helm install my-release stable/nginx
+Response: helm
+
+Command: ls -la | grep .txt
+Response: bash
+
+Response: `
+
 const refinementPromptTmplDefault string = `
 You are a DevOps expert. Consider the following shell command:
 %s
 
 The user wants to update it and asks you to %s.
+
+%s
 
 Follow the user's instructions.
 You need to consider the following:
@@ -147,6 +182,7 @@ You need to consider the following:
 - How the refinement modifies or extends the functionality
 - DevOps best practices and common patterns
 - Make the commands practical and executable
+- Use the documentation provided above for accurate syntax and options
 
 Generate 3 distinct command variations that address the refinement. Each should be a complete, executable command.
 
@@ -163,7 +199,7 @@ Your response must contain exactly 3 commands. For multi-line commands, use prop
 Format your response as:
 command1
 ---COMMAND---
-command2  
+command2
 ---COMMAND---
 command3
 
@@ -187,8 +223,26 @@ func ComposeRankingPrompt(query string, commands []types.EmbeddedCommand) string
 	return fmt.Sprintf(template, query, sb.String())
 }
 
+func ComposeToolDetectionPrompt(command string) string {
+	cfg := config.Get()
+	template := loadTemplate(cfg.Prompts.ToolDetectionTemplate, toolDetectionPromptTmplDefault)
+	return fmt.Sprintf(template, command)
+}
+
 func ComposeRefinementPrompt(selectedCommand, refinementQuery string) string {
 	cfg := config.Get()
 	template := loadTemplate(cfg.Prompts.RefinementTemplate, refinementPromptTmplDefault)
-	return fmt.Sprintf(template, selectedCommand, refinementQuery)
+	return fmt.Sprintf(template, selectedCommand, refinementQuery, "")
+}
+
+func ComposeRefinementPromptWithDocs(selectedCommand, refinementQuery, documentation string) string {
+	cfg := config.Get()
+	template := loadTemplate(cfg.Prompts.RefinementTemplate, refinementPromptTmplDefault)
+
+	docsSection := ""
+	if documentation != "" {
+		docsSection = fmt.Sprintf("Relevant documentation:\n%s\n", documentation)
+	}
+
+	return fmt.Sprintf(template, selectedCommand, refinementQuery, docsSection)
 }
