@@ -585,15 +585,38 @@ func (m tuiModel) refineCommand(refinementQuery string) tea.Cmd {
 	return func() tea.Msg {
 		selectedCommand := m.commands[m.paginator.Page].Text
 
+		// Open debug log file
+		debugFile, err := os.OpenFile("debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			log.Printf("Failed to open debug.log: %v", err)
+		} else {
+			defer debugFile.Close()
+			logger := log.New(debugFile, "", log.LstdFlags)
+
+			logger.Println("=== REFINEMENT DEBUG LOG ===")
+			logger.Printf("Original Command:\n%s\n", selectedCommand)
+			logger.Printf("Refinement Request: %s\n", refinementQuery)
+		}
+
 		// Step 1: Detect the primary tool/technology using LLM
 		toolDetectionPrompt := ollama.ComposeToolDetectionPrompt(selectedCommand)
 		toolName, err := m.ollamaClient.GenerateResponse(m.ctx, toolDetectionPrompt)
 		if err != nil {
+			if debugFile != nil {
+				logger := log.New(debugFile, "", log.LstdFlags)
+				logger.Printf("Tool Detection Error: %v\n", err)
+				logger.Println("=== END REFINEMENT DEBUG LOG ===\n")
+			}
 			// Fallback: proceed without documentation
 			return m.refineWithoutDocs(selectedCommand, refinementQuery)
 		}
 
 		toolName = strings.TrimSpace(toolName)
+
+		if debugFile != nil {
+			logger := log.New(debugFile, "", log.LstdFlags)
+			logger.Printf("Extracted Primary Tool Name: %s\n", toolName)
+		}
 
 		// Step 2: Fetch documentation from Context7 API
 		documentation := ""
@@ -605,9 +628,25 @@ func (m tuiModel) refineCommand(refinementQuery string) tea.Cmd {
 				docs, err := m.context7Client.GetLibraryDocs(m.ctx, libraryID, refinementQuery)
 				if err == nil {
 					documentation = docs
+				} else if debugFile != nil {
+					logger := log.New(debugFile, "", log.LstdFlags)
+					logger.Printf("Context7 GetLibraryDocs Error: %v\n", err)
 				}
+			} else if debugFile != nil {
+				logger := log.New(debugFile, "", log.LstdFlags)
+				logger.Printf("Context7 ResolveLibraryID Error: %v\n", err)
 			}
 			// Silently continue if Context7 fails - we'll use refinement without docs
+		}
+
+		if debugFile != nil {
+			logger := log.New(debugFile, "", log.LstdFlags)
+			if documentation != "" {
+				logger.Printf("Retrieved Documentation (length: %d chars):\n%s\n", len(documentation), documentation)
+			} else {
+				logger.Println("Retrieved Documentation: [NONE]")
+			}
+			logger.Println("=== END REFINEMENT DEBUG LOG ===\n")
 		}
 
 		// Step 3: Generate refinement with documentation context
