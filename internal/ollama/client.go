@@ -19,8 +19,9 @@ type Client struct {
 
 // EmbedRequest represents the request body for the /api/embed endpoint
 type EmbedRequest struct {
-	Model string   `json:"model"`
-	Input []string `json:"input"`
+	Model     string   `json:"model"`
+	KeepAlive string   `json:"keep_alive"`
+	Input     []string `json:"input"`
 }
 
 // EmbedResponse represents the response from the /api/embed endpoint
@@ -34,11 +35,12 @@ type EmbedResponse struct {
 
 // GenerateRequest represents the request body for the /api/generate endpoint
 type GenerateRequest struct {
-	Model   string  `json:"model"`
-	Prompt  string  `json:"prompt"`
-	Stream  bool    `json:"stream"`
-	Think   bool    `json:"think"`
-	Options Options `json:"options"`
+	Model     string  `json:"model"`
+	Prompt    string  `json:"prompt"`
+	Stream    bool    `json:"stream"`
+	Think     bool    `json:"think"`
+	KeepAlive string  `json:"keep_alive"`
+	Options   Options `json:"options"`
 }
 
 type Options struct {
@@ -67,8 +69,9 @@ func NewClient() *Client {
 func (c *Client) GenerateEmbeddings(ctx context.Context, textBatch []string) ([][]float32, error) {
 	cfg := config.Get()
 	request := EmbedRequest{
-		Model: cfg.Ollama.EmbeddingModel,
-		Input: textBatch,
+		Model:     cfg.Ollama.EmbeddingModel,
+		KeepAlive: "60m",
+		Input:     textBatch,
 	}
 
 	jsonData, err := json.Marshal(request)
@@ -106,10 +109,11 @@ func (c *Client) GenerateEmbeddings(ctx context.Context, textBatch []string) ([]
 func (c *Client) GenerateResponse(ctx context.Context, prompt string) (string, error) {
 	cfg := config.Get()
 	request := GenerateRequest{
-		Model:  cfg.Ollama.GenerationModel,
-		Prompt: prompt,
-		Stream: false,
-		Think: false,
+		Model:     cfg.Ollama.GenerationModel,
+		Prompt:    prompt,
+		Stream:    false,
+		Think:     false,
+		KeepAlive: "60m",
 		Options: Options{
 			Temperature: 0.2,
 		},

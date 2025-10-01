@@ -619,8 +619,10 @@ func parseRefinementResponse(response string) []string {
 	if strings.Contains(response, "---COMMAND---") {
 		parts := strings.Split(response, "---COMMAND---")
 		var commands []string
-
-		for _, part := range parts {
+		for i, part := range parts {
+			if i > 2 {
+				break
+			}
 			cmd := strings.TrimSpace(part)
 			if cmd != "" {
 				commands = append(commands, cmd)
