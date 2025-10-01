@@ -6,9 +6,11 @@ A prototype RAG (Retrieval-Augmented Generation) system for finding historical z
 
 ### Core Components
 - **Vector Database**: Qdrant (local Docker container on port 6334)
-- **LLM & Embeddings**: Ollama (dengcao/Qwen3-Embedding-4B:Q5_K_M, qwen2.5-coder:14b)
+- **Embeddings**: Ollama (dengcao/Qwen3-Embedding-0.6B:F16 - 1024 dimensions)
+- **Text Generation**: Ollama (qwen3:latest)
 - **Language**: Go 1.25.1
-- **Interface**: Single binary with TUI app
+- **Interface**: Single binary with TUI (Bubble Tea framework)
+- **CLI**: Single recall binary handles both ingestion and query
 
 ## Prerequisites
 
@@ -24,7 +26,13 @@ docker compose up -d
 ```
 
 ### 2. Setup Ollama Models
-These two fit in 16GB of my RTX 4080 and produce decent results.
+Default configuration uses:
+```bash
+ollama pull dengcao/Qwen3-Embedding-0.6B:F16
+ollama pull qwen3:latest
+```
+
+Alternative configuration (better quality, more VRAM):
 ```bash
 ollama pull dengcao/Qwen3-Embedding-4B:Q5_K_M
 ollama pull qwen2.5-coder:14b
@@ -42,44 +50,56 @@ go build -o ./bin/recall ./cmd/main.go
 ```mermaid
 graph TD
     A[.zsh_history file] --> B[Parse Commands & Timestamps]
-    B --> C[Filter Trivial Commands]
-    C --> D[Process in Batches of 10]
-    D --> E[Generate Command Summaries<br/>Qwen2.5-Coder]
-    E --> F[Generate Embeddings<br/>Qwen3-Embedding-4B]
-    F --> G[Store Vectors & Metadata<br/>in Qdrant]
-    G --> H[Create Collections:<br/>- zsh_commands<br/>- feedback_pairs]
-    H --> I[Ingestion Complete]
-    
+    B --> C[Process in Batches of 10]
+    C --> D[Generate Command Summaries<br/>LLM via Ollama]
+    D --> E[Generate Embeddings<br/>Embedding Model via Ollama]
+    E --> F[Store Vectors & Metadata<br/>in Qdrant Collection]
+
+    D --> G[Optional: Export to JSON]
+
     style A fill:#e1f5fe
-    style I fill:#c8e6c9
+    style F fill:#c8e6c9
+    style D fill:#fff3e0
     style E fill:#fff3e0
-    style F fill:#fff3e0
+    style G fill:#f3e5f5
 ```
 
 ### Query & Recall Workflow
 
 ```mermaid
 graph TD
-    A[User Query] --> E[Vector Search in Qdrant<br/>Top-15 Candidates]
-    E --> F[LLM Ranking<br/>Qwen2.5-Coder]
-    F --> G[Parse Response<br/>Extract Top-3]
-    G --> |TUI| J[Interactive Display]
-    
-    J --> K{User Action?}
-    K -->|Enter| L[Copy to Clipboard]
-    K -->|E| M[Open in Editor]
-    K -->|U| N[Refine Command]
-    K -->|R| O[Repeat Search]
-    
-    N --> P[Generate Refinement<br/>Qwen2.5-Coder]
-    P --> K
-    
+    A[User Query] --> B[Generate Query Embedding<br/>Embedding Model via Ollama]
+    B --> C[Vector Search in Qdrant<br/>Top-K Candidates]
+    C --> D[LLM Ranking<br/>Generation Model via Ollama]
+    D --> E[Parse Response<br/>Extract Top-3]
+    E --> F[TUI Display with Paginator]
+
+    F --> G{User Action?}
+    G -->|Tab/Arrow Keys| H[Navigate Commands]
+    G -->|Up/Down| I[Scroll Viewport]
+    G -->|Enter| J[Copy to Clipboard & Exit]
+    G -->|E| K[Open in $EDITOR & Exit]
+    G -->|U| L[Enter Refinement Mode]
+    G -->|R| M[Repeat Search]
+    G -->|Esc| N[Quit]
+
+    H --> F
+    I --> F
+    M --> A
+
+    L --> O[Text Input for Refinement Query]
+    O --> P{Submit or Cancel?}
+    P -->|Enter| Q[Generate 3 New Commands<br/>Generation Model via Ollama]
+    P -->|Esc| F
+    Q --> R[Display Generated Commands]
+    R --> F
+
     style A fill:#e1f5fe
-    style I fill:#c8e6c9
-    style L fill:#c8e6c9
-    style M fill:#c8e6c9
-    style F fill:#fff3e0
-    style P fill:#fff3e0
+    style J fill:#c8e6c9
+    style K fill:#c8e6c9
+    style N fill:#ffcdd2
+    style D fill:#fff3e0
+    style Q fill:#fff3e0
 ```
 
 ## Usage
@@ -101,12 +121,23 @@ graph TD
 
 ## Configuration
 
-All configuration is hardcoded in `internal/config/config.go`:
-- Qdrant: `http://localhost:6333`
-- Ollama: `http://localhost:11434`
-- Vector dimensions: 768 (nomic-embed-text)
-- Top-K candidates: 15
-- Final results: 3
+Configuration is loaded from `~/.config/total-recall/config.yaml` with defaults in `internal/config/config.go`:
+
+### Default Values
+- **Qdrant**: `localhost:6334`
+- **Ollama**: `http://192.168.0.10:11434`
+- **Embedding Model**: `dengcao/Qwen3-Embedding-0.6B:F16`
+- **Generation Model**: `qwen3:latest`
+- **Vector dimensions**: 1024
+- **Top-K candidates**: 15
+- **Final results**: 3
+
+### Customizable Prompt Templates
+- Summary Prompt: `~/.config/total-recall/summary_prompt.tmpl`
+- Ranking Prompt: `~/.config/total-recall/ranking_prompt.tmpl`
+- Refinement Prompt: `~/.config/total-recall/refinement_prompt.tmpl`
+
+Templates fallback to built-in defaults if files don't exist.
 
 ## Troubleshooting
 
